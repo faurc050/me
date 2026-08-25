@@ -1,10 +1,31 @@
-# me
+# Guess the Number
 
-A minimal Node.js starter project initialized for local development.
+A quick, friendly terminal game built with Node.js. The game secretly chooses a
+number from 1 to 100, and your job is to find it in as few guesses as possible.
+After every valid guess, you get a useful hint telling you whether to search
+higher or lower. Invalid input is handled without costing a guess, so you can
+focus on the puzzle.
+
+## How to play
+
+Start the game with `npm run game`, enter a whole number between 1 and 100, and
+keep narrowing the range until you find the answer. The game reports how many
+guesses you needed when you win. Use `Ctrl+C` to leave at any time.
+
+## Coming in the next update
+
+- **Play again:** start a fresh round without restarting the command.
+- **Difficulty levels:** choose smaller or larger number ranges for a quicker
+	challenge or a harder hunt.
+- **Best score tracking:** keep your lowest guess count during the session.
+- **Smarter feedback:** show the remaining range and warn when a guess repeats.
+- **Polished terminal flow:** add a welcome screen, clearer prompts, and a
+	graceful end-of-game option.
 
 ## Scripts
 
 - `npm start` — run the app
+- `npm run game` — play Guess the Number in the terminal
 - `npm test` — run the test suite
 
 ## Structure
@@ -18,4 +39,10 @@ A minimal Node.js starter project initialized for local development.
 ```bash
 npm install
 npm start
+```
+
+To play:
+
+```bash
+npm run game
 ```
