@@ -2,11 +2,66 @@ import pygame
 
 
 def draw_hud(screen, player, dungeon, font):
-    health_ratio = max(0.0, player.health / player.max_health)
-    pygame.draw.rect(screen, (40, 40, 40), (30, 26, 260, 24))
-    pygame.draw.rect(screen, (220, 40, 40), (30, 26, int(260 * health_ratio), 24))
-    hp_label = font.render(f"HP: {int(player.health)} / {player.max_health}", True, (255, 255, 255))
-    screen.blit(hp_label, (30, 52))
+    health_ratio = max(0.0, min(1.0, player.health / player.max_health))
+
+    x, y = 30, 26
+    width, height = 260, 24
+
+    # Shadow
+    pygame.draw.rect(
+        screen,
+        (8, 8, 10),
+        (x + 4, y + 4, width, height)
+    )
+
+    # Outer dark border
+    pygame.draw.rect(
+        screen,
+        (10, 10, 12),
+        (x - 4, y - 4, width + 8, height + 8)
+    )
+
+    # Metal border
+    pygame.draw.rect(
+        screen,
+        (90, 90, 95),
+        (x - 2, y - 2, width + 4, height + 4)
+    )
+
+    # Inside
+    pygame.draw.rect(
+        screen,
+        (25, 25, 28),
+        (x, y, width, height)
+    )
+
+    # Health
+    health_width = int(width * health_ratio)
+
+    if health_width > 0:
+        pygame.draw.rect(
+            screen,
+            (150, 30, 35),
+            (x, y, health_width, height)
+        )
+
+        # Highlight
+        pygame.draw.line(
+            screen,
+            (210, 60, 60),
+            (x + 2, y + 2),
+            (x + health_width - 2, y + 2),
+            2
+        )
+
+    # HP text
+    hp_label = font.render(
+        f"HP: {int(player.health)} / {player.max_health}",
+        True,
+        (230, 230, 230)
+    )
+
+    screen.blit(hp_label, (30, 56))
 
     weapon_text = font.render(f"Weapon: {player.weapon_name.title()}", True, (255, 255, 255))
     screen.blit(weapon_text, (310, 26))
