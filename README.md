@@ -1,6 +1,37 @@
-# Python Dungeon RPG Prototype
+# Dungeon RPG
 
-A cleaner, more stable 2D dungeon RPG prototype built with Python and Pygame.
+A 2D dungeon RPG built with Python and Pygame. Explore random rooms, fight
+enemies, collect gold, choose upgrades, and defeat the boss.
+
+## Play the Windows version
+
+1. Download [`main.exe`](https://github.com/faurc050/me/releases/latest).
+2. Open the downloaded file to start the game.
+3. If Windows shows a security warning, choose **More info** and then **Run anyway**.
+
+## Run from source
+
+Install Python 3.10 or newer, then run these commands in the project folder:
+
+```bash
+python -m venv venv
+```
+
+Windows PowerShell:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python main.py
+```
+
+Windows Command Prompt:
+
+```bat
+venv\Scripts\activate
+python -m pip install -r requirements.txt
+python main.py
+```
 
 ## Features
 - WASD movement
@@ -14,17 +45,7 @@ A cleaner, more stable 2D dungeon RPG prototype built with Python and Pygame.
 - music toggle
 - full 360-degree character aiming and weapon rotation
 
-## Run on Windows
-1. Open PowerShell in the project folder, or just double-click `run_game.bat`.
-2. Create a venv if desired:
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-3. Install dependencies:
-   pip install -r requirements.txt
-4. Start the game:
-   python main.py
-   or
-   .\run_game.bat
+You can also double-click `run_game.bat` after installing the dependency.
 
 ## Controls
 - Move: W A S D
