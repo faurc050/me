@@ -1,4 +1,10 @@
-node_modules/
+__pycache__/
+build/
+.venv/
+venv/
+*.pyc
+.env
+.DS_Storenode_modules/
 dist/
 .env
 npm-debug.log*
