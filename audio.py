@@ -37,21 +37,23 @@ class AudioManager:
         self.sounds["hurt"] = self._make_tone(90, 0.14, 0.28)
         self.sounds["victory"] = self._make_chord((220, 330, 440), 0.22, 0.18)
         self.sounds["death"] = self._make_tone(60, 0.28, 0.22)
+        self.sounds["sword_voice"] = self._make_voice(160, 0.18, 0.16)
+        self.sounds["boss_roar"] = self._make_voice(72, 0.3, 0.22)
 
         self.themes["menu"] = self._build_theme([
-            (220, 0.56), (262, 0.48), (330, 0.72), (294, 0.48),
-            (262, 0.56), (220, 0.52), (196, 0.76), (174, 0.52),
-            (220, 0.56), (262, 0.48), (330, 0.72), (294, 0.48),
-            (330, 0.56), (262, 0.52), (220, 0.68), (196, 0.44),
-        ], tempo=60, volume=0.03)
+            (180, 0.48), (220, 0.42), (262, 0.56), (330, 0.52),
+            (294, 0.54), (220, 0.44), (196, 0.72), (146, 0.48),
+            (220, 0.52), (262, 0.46), (330, 0.60), (392, 0.52),
+            (330, 0.64), (262, 0.48), (196, 0.68), (146, 0.42),
+        ], tempo=54, volume=0.028)
         self.themes["game"] = self._build_theme([
-            (174, 0.42), (220, 0.38), (262, 0.52), (220, 0.38),
-            (174, 0.42), (146, 0.38), (196, 0.52), (220, 0.38),
-            (262, 0.42), (220, 0.38), (174, 0.52), (146, 0.38),
-            (196, 0.42), (220, 0.38), (262, 0.52), (330, 0.64),
-            (262, 0.42), (220, 0.38), (196, 0.52), (174, 0.38),
-            (146, 0.42), (174, 0.38), (196, 0.52), (220, 0.70),
-        ], tempo=64, volume=0.025)
+            (110, 0.40), (146, 0.30), (174, 0.42), (220, 0.32),
+            (174, 0.38), (130, 0.30), (110, 0.42), (146, 0.34),
+            (196, 0.40), (220, 0.34), (174, 0.48), (146, 0.36),
+            (110, 0.40), (146, 0.30), (196, 0.54), (262, 0.60),
+            (220, 0.40), (174, 0.30), (146, 0.44), (110, 0.36),
+            (92, 0.40), (146, 0.36), (196, 0.54), (220, 0.66),
+        ], tempo=58, volume=0.022)
         return True
 
     def _make_tone(self, frequency, duration, volume):
@@ -82,6 +84,22 @@ class AudioManager:
                 envelope = max(0.0, 1.0 - (i / frame_count))
                 value += wave * envelope
             sample = int(32767 * volume * (value / len(frequencies)))
+            pcm.append(sample)
+        return pygame.mixer.Sound(buffer=pcm.tobytes())
+
+    def _make_voice(self, base_frequency, duration, volume):
+        if not self.enabled:
+            return None
+        sample_rate = 22050
+        frame_count = int(sample_rate * duration)
+        pcm = array.array("h")
+        for i in range(frame_count):
+            time = i / sample_rate
+            envelope = max(0.0, 1.0 - (i / frame_count))
+            vibrato = 1.0 + 0.12 * math.sin(2 * math.pi * 6 * time)
+            tremor = math.sin(2 * math.pi * (base_frequency * vibrato) * time)
+            formant = math.sin(2 * math.pi * (base_frequency * 0.5) * time + 0.7)
+            sample = int(32767 * volume * envelope * (0.65 * tremor + 0.35 * formant))
             pcm.append(sample)
         return pygame.mixer.Sound(buffer=pcm.tobytes())
 

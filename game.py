@@ -1,4 +1,6 @@
+import json
 import math
+import os
 import random
 
 import pygame
@@ -6,7 +8,8 @@ import pygame
 from audio import AudioManager
 
 WIDTH, HEIGHT = 1280, 720
-ROOM_W, ROOM_H = 1120, 560
+ROOM_W, ROOM_H = 1180, 600
+SAVE_PATH = os.path.join(os.path.dirname(__file__), "savegame.json")
 
 
 class Weapon:
@@ -27,6 +30,10 @@ WEAPONS = {
     "greatsword": Weapon("Greatsword", 22, 100, 0.75),
     "bow": Weapon("Bow", 9, 420, 0.46, 500, (221, 200, 100), 5, True),
     "staff": Weapon("Staff", 11, 440, 0.42, 560, (120, 170, 255), 6, True, 1),
+    "reaver": Weapon("Reaver", 30, 118, 0.72),
+    "phoenix_bow": Weapon("Phoenix Bow", 15, 500, 0.38, 640, (255, 170, 90), 7, True),
+    "arcane_staff": Weapon("Arcane Staff", 18, 530, 0.34, 700, (155, 110, 255), 7, True, 2),
+    "voidblade": Weapon("Voidblade", 38, 132, 0.68),
 }
 
 
@@ -48,6 +55,49 @@ class Projectile:
         self.life -= dt
 
 
+class Drop:
+    def __init__(self, x, y, kind, value=1):
+        self.x = x
+        self.y = y
+        self.kind = kind
+        self.value = value
+        self.radius = 8
+        self.life = 18.0
+        self.color = {"gold": (238, 204, 96), "essence": (128, 196, 255), "vital": (120, 255, 160), "heal": (120, 255, 140)}[kind]
+        self.vx = random.uniform(-18, 18)
+        self.vy = random.uniform(-14, 14)
+
+    def update(self, dt):
+        self.life -= dt
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        self.vx *= 0.97
+        self.vy *= 0.97
+
+    def draw(self, screen):
+        glow = max(3, int(self.radius + 5 + (1.0 - min(self.life, 12.0) / 12.0) * 12))
+        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), glow)
+        pygame.draw.circle(screen, (255, 255, 255), (int(self.x), int(self.y)), max(2, self.radius - 2))
+
+
+class HealingWell:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.radius = 18
+        self.cooldown = 0.0
+        self.pulse = 0.0
+
+    def update(self, dt):
+        self.cooldown = max(0.0, self.cooldown - dt)
+        self.pulse = max(0.0, self.pulse - dt)
+
+    def draw(self, screen):
+        glow = 18 + int(8 * math.sin(pygame.time.get_ticks() * 0.006))
+        pygame.draw.circle(screen, (90, 220, 140), (int(self.x), int(self.y)), glow, 2)
+        pygame.draw.circle(screen, (120, 255, 170), (int(self.x), int(self.y)), max(6, glow // 3))
+
+
 class Room:
     def __init__(self, kind, x=80, y=80, w=ROOM_W, h=ROOM_H):
         self.kind = kind
@@ -66,6 +116,7 @@ class Room:
         self.cleared = False
         self.upgrade_given = False
         self.theme = random.choice(["stone", "crypt", "forge", "swamp"])
+        self.healing_well = None
 
     def center_x(self):
         return self.x + self.w / 2
@@ -90,6 +141,7 @@ class Enemy:
         self.attack_range = 0
         self.vision = 350
         self.charge_timer = 0.0
+        self.roared = False
 
         if kind == "goblin":
             self.max_health = 28
@@ -164,8 +216,10 @@ class Enemy:
 
     def take_damage(self, amount):
         self.health -= amount
+        self.hit_flash = 0.12
         if self.health <= 0:
             self.alive = False
+        return amount
 
     def update(self, dt, player, room, projectiles):
         if not self.alive:
@@ -248,6 +302,7 @@ class Enemy:
     def draw(self, screen):
         if not self.alive:
             return
+        pygame.draw.ellipse(screen, (0, 0, 0), (int(self.x - self.radius * 1.1), int(self.y - self.radius * 0.5), int(self.radius * 2.2), int(self.radius * 1.1)))
         pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
         pygame.draw.circle(screen, (35, 35, 35), (int(self.x), int(self.y)), max(4, self.radius - 5))
 
@@ -274,6 +329,7 @@ class Player:
         self.weapon_name = "sword"
         self.attack_cooldown = 0.0
         self.angle = 0.0
+        self.attack_pulse = 0.0
         self.gold = 0
         self.crit_chance = 0.12
         self.crit_damage = 1.6
@@ -288,6 +344,7 @@ class Player:
 
     def update(self, dt, keys, room, mouse_pos):
         self.attack_cooldown = max(0.0, self.attack_cooldown - dt)
+        self.attack_pulse = max(0.0, self.attack_pulse - dt)
         self.dodge_cooldown = max(0.0, self.dodge_cooldown - dt)
         self.hit_flash = max(0.0, self.hit_flash - dt)
         self.dash_cooldown = max(0.0, self.dash_cooldown - dt)
@@ -328,6 +385,7 @@ class Player:
         safe_amount = max(1, int(amount * (1.0 - reduction)))
         self.health -= safe_amount
         self.hit_flash = 0.18
+        return safe_amount
 
     def dodge(self):
         if self.dodge_cooldown > 0:
@@ -365,6 +423,7 @@ class Player:
         if self.attack_cooldown > 0:
             return False
         self.attack_cooldown = weapon.cooldown
+        self.attack_pulse = 0.22
 
         dx = mouse_pos[0] - self.x
         dy = mouse_pos[1] - self.y
@@ -374,7 +433,7 @@ class Player:
         if weapon.is_ranged:
             speed = weapon.projectile_speed
             projectiles.append(Projectile(self.x, self.y, math.cos(angle) * speed, math.sin(angle) * speed, weapon.projectile_radius, weapon.damage + self.damage * 0.4, weapon.projectile_color, "player"))
-            return True
+            return {"projectile": True, "damage": int(weapon.damage + self.damage * 0.4)}
 
         for enemy in enemies:
             if not enemy.alive:
@@ -392,10 +451,10 @@ class Player:
             dmg = weapon.damage + self.damage
             if crit:
                 dmg *= self.crit_damage
-            enemy.take_damage(dmg)
+            damage_done = enemy.take_damage(dmg)
             if self.lifesteal > 0:
                 self.health = min(self.max_health, self.health + dmg * self.lifesteal * 0.1)
-            return True
+            return {"enemy": enemy, "damage": int(damage_done), "critical": crit}
         return False
 
     def draw(self, screen):
@@ -412,13 +471,24 @@ class Player:
         end_y = py + math.sin(self.angle) * 38
 
         if weapon.name == "Sword":
-            pygame.draw.line(screen, (220, 180, 110), (px, py), (end_x, end_y), 6)
-            pygame.draw.line(screen, (255, 230, 180), (arm_x, arm_y), (end_x, end_y), 2)
+            swing_alpha = max(0.0, self.attack_pulse / 0.22)
+            swing_len = 28 + int(26 * swing_alpha)
+            swing_end_x = px + math.cos(self.angle) * swing_len
+            swing_end_y = py + math.sin(self.angle) * swing_len
+            pygame.draw.line(screen, (220, 180, 110), (px, py), (swing_end_x, swing_end_y), 6)
+            pygame.draw.line(screen, (255, 230, 180), (arm_x, arm_y), (swing_end_x, swing_end_y), 2)
+            for offset in range(8):
+                arc_x = px + math.cos(self.angle) * (18 + offset * 3)
+                arc_y = py + math.sin(self.angle) * (18 + offset * 3)
+                pygame.draw.circle(screen, (255, 190, 110), (int(arc_x), int(arc_y)), 2 + int(swing_alpha * 4))
         elif weapon.name == "Greatsword":
             end_x = px + math.cos(self.angle) * 54
             end_y = py + math.sin(self.angle) * 54
             pygame.draw.line(screen, (195, 120, 90), (px, py), (end_x, end_y), 10)
             pygame.draw.line(screen, (255, 200, 160), (arm_x, arm_y), (end_x, end_y), 3)
+            if self.attack_pulse > 0:
+                glow_r = 18 + int(18 * (self.attack_pulse / 0.22))
+                pygame.draw.circle(screen, (255, 150, 120), (int(end_x), int(end_y)), glow_r, 2)
         elif weapon.name == "Bow":
             end_x = px + math.cos(self.angle) * 34
             end_y = py + math.sin(self.angle) * 34
@@ -430,6 +500,30 @@ class Player:
             end_y = py + math.sin(self.angle) * 40
             pygame.draw.line(screen, (110, 135, 255), (px, py), (end_x, end_y), 5)
             pygame.draw.circle(screen, (140, 180, 255), (int(end_x), int(end_y)), 6)
+            if self.attack_pulse > 0:
+                wave = int(12 + 18 * (self.attack_pulse / 0.22))
+                pygame.draw.circle(screen, (180, 220, 255), (int(end_x), int(end_y)), wave, 2)
+
+
+class FloatingText:
+    def __init__(self, x, y, text, color, life=0.8, size=20):
+        self.x = x
+        self.y = y
+        self.text = text
+        self.color = color
+        self.life = life
+        self.max_life = life
+        self.size = size
+
+    def update(self, dt):
+        self.life -= dt
+        self.y -= 26 * dt
+
+    def draw(self, screen, font):
+        alpha = max(0, min(1.0, self.life / max(0.1, self.max_life)))
+        color = (*self.color[:3], int(alpha * 255))
+        rendered = font.render(self.text, True, color)
+        screen.blit(rendered, (int(self.x), int(self.y)))
 
 
 class Dungeon:
@@ -512,7 +606,7 @@ class Game:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("Dungeon Warden")
+        pygame.display.set_caption("Dungeon Warden v1.0.2")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("arial", 22)
         self.big_font = pygame.font.SysFont("arial", 42, bold=True)
@@ -521,7 +615,10 @@ class Game:
         self.player = Player(WIDTH // 2, HEIGHT // 2)
         self.current_room = None
         self.state = "menu"
+        self.menu_buttons = []
         self.projectiles = []
+        self.drops = []
+        self.damage_texts = []
         self.keys = None
         self.pending_choices = []
         self.pending_boxes = []
@@ -535,16 +632,73 @@ class Game:
         self.door_pos = None
         self.current_floor = 1
         self.max_floor = 4
+        self.unlocked_weapons = {"sword"}
+        self.weapon_unlocks = {"greatsword": 2, "bow": 2, "staff": 2, "reaver": 3, "phoenix_bow": 3, "arcane_staff": 4, "voidblade": 5}
+        self.boss_intro_timer = 0.0
+        self.phase_message_timer = 0.0
+        self.settings = {"music": True, "shadows": True}
         self.audio.play_theme("menu")
 
-    def start_run(self):
-        self.current_floor = 1
-        self.max_floor = 4
+    def save_game(self):
+        data = {
+            "current_floor": self.current_floor,
+            "max_floor": self.max_floor,
+            "player": {
+                "x": self.player.x,
+                "y": self.player.y,
+                "health": self.player.health,
+                "max_health": self.player.max_health,
+                "damage": self.player.damage,
+                "gold": self.player.gold,
+                "armor": self.player.armor,
+                "weapon_name": self.player.weapon_name,
+                "heal_potions": self.player.heal_potions,
+                "crit_chance": self.player.crit_chance,
+                "crit_damage": self.player.crit_damage,
+                "lifesteal": self.player.lifesteal,
+            },
+            "unlocked_weapons": sorted(self.unlocked_weapons),
+            "settings": self.settings,
+            "room": self.dungeon.current_room_id if self.dungeon is not None else 0,
+            "dungeon": {"rooms": []},
+        }
+        with open(SAVE_PATH, "w", encoding="utf-8") as file:
+            json.dump(data, file)
+
+    def load_game(self):
+        if not os.path.exists(SAVE_PATH):
+            return False
+        try:
+            with open(SAVE_PATH, "r", encoding="utf-8") as file:
+                data = json.load(file)
+        except Exception:
+            return False
+        self.current_floor = int(data.get("current_floor", 1))
+        self.max_floor = int(data.get("max_floor", 4))
+        self.settings = data.get("settings", self.settings)
+        self.audio.music_muted = not self.settings.get("music", True)
+        self.unlocked_weapons = set(data.get("unlocked_weapons", ["sword"]))
         self.dungeon.generate()
         self.current_room = self.dungeon.current_room()
-        self.current_room.spawned = False
-        self.player = Player(WIDTH // 2, HEIGHT // 2)
+        self.dungeon.current_room_id = int(data.get("room", 0))
+        self.current_room = self.dungeon.rooms.get(self.dungeon.current_room_id, self.dungeon.current_room())
+        self.player = Player(self.current_room.center_x(), self.current_room.center_y())
+        p = data.get("player", {})
+        self.player.x = float(p.get("x", WIDTH / 2))
+        self.player.y = float(p.get("y", HEIGHT / 2))
+        self.player.health = float(p.get("health", self.player.max_health))
+        self.player.max_health = float(p.get("max_health", self.player.max_health))
+        self.player.damage = float(p.get("damage", self.player.damage))
+        self.player.gold = int(p.get("gold", 0))
+        self.player.armor = int(p.get("armor", 0))
+        self.player.weapon_name = p.get("weapon_name", "sword")
+        self.player.heal_potions = int(p.get("heal_potions", 1))
+        self.player.crit_chance = float(p.get("crit_chance", self.player.crit_chance))
+        self.player.crit_damage = float(p.get("crit_damage", self.player.crit_damage))
+        self.player.lifesteal = float(p.get("lifesteal", self.player.lifesteal))
         self.projectiles = []
+        self.drops = []
+        self.damage_texts = []
         self.pending_choices = []
         self.pending_boxes = []
         self.shop_choices = []
@@ -558,6 +712,44 @@ class Game:
         self.state = "playing"
         self.audio.play_theme("game")
         self.spawn_room_enemies()
+        return True
+
+    def maybe_unlock_weapons(self):
+        for weapon_name, floor_needed in self.weapon_unlocks.items():
+            if self.current_floor >= floor_needed:
+                self.unlocked_weapons.add(weapon_name)
+        if self.player.weapon_name not in self.unlocked_weapons:
+            self.player.weapon_name = "sword"
+
+    def start_run(self):
+        self.current_floor = 1
+        self.max_floor = 4
+        self.unlocked_weapons = {"sword"}
+        self.dungeon.generate()
+        self.current_room = self.dungeon.current_room()
+        self.current_room.spawned = False
+        self.player = Player(WIDTH // 2, HEIGHT // 2)
+        self.projectiles = []
+        self.drops = []
+        self.damage_texts = []
+        self.pending_choices = []
+        self.pending_boxes = []
+        self.shop_choices = []
+        self.shop_boxes = []
+        self.shop_costs = []
+        self.shop_leave_button = None
+        self.shop_room_id = None
+        self.transition_lock = 0.0
+        self.near_door = None
+        self.door_pos = None
+        self.boss_intro_timer = 0.0
+        self.phase_message_timer = 0.0
+        self.maybe_unlock_weapons()
+        self.state = "playing"
+        self.audio.play_theme("game")
+        self.spawn_room_enemies()
+        if self.current_room.kind == "boss":
+            self.boss_intro_timer = 2.8
 
     def advance_floor(self):
         if self.current_floor >= self.max_floor:
@@ -566,6 +758,7 @@ class Game:
             return
 
         self.current_floor += 1
+        self.maybe_unlock_weapons()
         self.dungeon.generate()
         self.dungeon.current_room_id = 0
         self.current_room = self.dungeon.current_room()
@@ -574,6 +767,8 @@ class Game:
         self.player.y = HEIGHT // 2
         self.player.health = min(self.player.max_health, self.player.health + 18)
         self.projectiles = []
+        self.drops = []
+        self.damage_texts = []
         self.pending_choices = []
         self.pending_boxes = []
         self.shop_choices = []
@@ -584,9 +779,13 @@ class Game:
         self.transition_lock = 0.0
         self.near_door = None
         self.door_pos = None
+        self.boss_intro_timer = 0.0
+        self.phase_message_timer = 0.0
         self.state = "playing"
         self.audio.play_theme("game")
         self.spawn_room_enemies()
+        if self.current_room.kind == "boss":
+            self.boss_intro_timer = 2.8
 
     def spawn_room_enemies(self):
         room = self.current_room
@@ -605,8 +804,8 @@ class Game:
             boss.scale_for_floor(self.current_floor)
             room.enemies = [boss]
         else:
-            count = 2 + self.current_floor + random.randint(0, 2)
-            count = min(count, 7)
+            count = 2 + self.current_floor * 2 + random.randint(0, 3)
+            count = min(count, 12)
             kinds = ["goblin", "goblin", "archer", "tank", "brute", "mage", "runner"]
             door_positions = {
                 "left": (room.left + 40, room.center_y()),
@@ -629,9 +828,33 @@ class Game:
                 enemy = Enemy(kind, x, y)
                 enemy.scale_for_floor(self.current_floor)
                 room.enemies.append(enemy)
+        if self.current_floor >= 2 and random.random() < 0.35:
+            room.healing_well = HealingWell(room.center_x() + random.uniform(-120, 120), room.center_y() + random.uniform(-90, 90))
+        else:
+            room.healing_well = None
         room.spawned = True
         room.cleared = False
         room.upgrade_given = False
+
+    def spawn_enemy_drop(self, enemy):
+        if not enemy.alive:
+            return
+        if enemy.kind == "boss":
+            for i in range(10):
+                self.drops.append(Drop(enemy.x + random.uniform(-20, 20), enemy.y + random.uniform(-20, 20), "essence", 1))
+            self.drops.append(Drop(enemy.x, enemy.y, "vital", 1))
+            self.player.gold += 40
+            self.player.health = min(self.player.max_health, self.player.health + 12)
+        else:
+            if random.random() < 0.85:
+                roll = random.random()
+                if roll < 0.55:
+                    kind = "gold"
+                elif roll < 0.85:
+                    kind = "essence"
+                else:
+                    kind = "heal"
+                self.drops.append(Drop(enemy.x, enemy.y, kind, 1))
 
     def apply_upgrade(self, upgrade):
         typ = upgrade["type"]
@@ -651,6 +874,7 @@ class Game:
         elif typ == "lifesteal":
             self.player.lifesteal += upgrade["value"]
         elif typ == "weapon":
+            self.unlocked_weapons.add(upgrade["value"])
             self.player.weapon_name = upgrade["value"]
         elif typ == "heal":
             self.player.health = min(self.player.max_health, self.player.health + int(upgrade["value"]))
@@ -674,6 +898,10 @@ class Game:
             {"name": "Greatsword", "type": "weapon", "value": "greatsword", "rarity": "rare"},
             {"name": "Bow", "type": "weapon", "value": "bow", "rarity": "rare"},
             {"name": "Staff", "type": "weapon", "value": "staff", "rarity": "rare"},
+            {"name": "Reaver", "type": "weapon", "value": "reaver", "rarity": "epic"},
+            {"name": "Phoenix Bow", "type": "weapon", "value": "phoenix_bow", "rarity": "epic"},
+            {"name": "Arcane Staff", "type": "weapon", "value": "arcane_staff", "rarity": "epic"},
+            {"name": "Voidblade", "type": "weapon", "value": "voidblade", "rarity": "legendary"},
             {"name": "Max HP +40", "type": "max_health", "value": 40, "rarity": "uncommon"},
             {"name": "Damage +6", "type": "damage", "value": 6, "rarity": "uncommon"},
             {"name": "Move Speed +18%", "type": "speed", "value": 0.18, "rarity": "uncommon"},
@@ -681,7 +909,11 @@ class Game:
             {"name": "Armor +12", "type": "armor", "value": 12, "rarity": "uncommon"},
         ]
 
-        weights = {"common": 70, "uncommon": 25, "rare": 5}
+        for option in pool:
+            if option["type"] == "weapon" and option["value"] not in self.unlocked_weapons:
+                option["rarity"] = "legendary" if option["rarity"] == "legendary" else "epic"
+
+        weights = {"common": 70, "uncommon": 25, "rare": 8, "epic": 4, "legendary": 1}
         selected = []
         seen = set()
         while len(selected) < 3:
@@ -690,6 +922,7 @@ class Game:
             if key in seen:
                 continue
             seen.add(key)
+            option["display_name"] = f"{option['rarity'].title()} {option['name']}"
             selected.append(option)
         return selected[:3]
 
@@ -745,9 +978,33 @@ class Game:
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = event.pos
-                if self.state == "playing":
-                    if self.player.attack(pos, self.current_room, self.current_room.enemies, self.projectiles):
+                if self.state == "menu":
+                    if self.menu_buttons is not None:
+                        for button in self.menu_buttons:
+                            if button["rect"].collidepoint(pos):
+                                action = button["action"]
+                                if action == "start":
+                                    self.start_run()
+                                elif action == "load":
+                                    self.load_game()
+                                elif action == "settings":
+                                    self.state = "settings"
+                                break
+                elif self.state == "playing":
+                    hit = self.player.attack(pos, self.current_room, self.current_room.enemies, self.projectiles)
+                    if hit:
                         self.audio.play("attack" if not WEAPONS[self.player.weapon_name].is_ranged else "shoot")
+                        self.audio.play("sword_voice")
+                        if isinstance(hit, dict) and hit.get("enemy") is not None:
+                            info = hit
+                            base = info["enemy"].x
+                            base_y = info["enemy"].y - 18
+                            label = f"{int(info['damage'])}"
+                            if info.get("critical"):
+                                label = f"CRIT {int(info['damage'])}"
+                                self.damage_texts.append(FloatingText(base, base_y, label, (255, 220, 110), 0.9, 20))
+                            else:
+                                self.damage_texts.append(FloatingText(base, base_y, label, (255, 210, 120), 0.8, 18))
                 elif self.state == "upgrade":
                     for idx, rect in enumerate(self.pending_boxes):
                         if rect.collidepoint(pos):
@@ -794,6 +1051,19 @@ class Game:
                         self.shop_leave_button = None
                 elif self.state == "menu" and event.key == pygame.K_RETURN:
                     self.start_run()
+                elif self.state == "settings" and event.key == pygame.K_1:
+                    self.settings["music"] = not self.settings.get("music", True)
+                    self.audio.music_muted = not self.settings["music"]
+                    if self.settings["music"]:
+                        self.audio.resume_music()
+                    else:
+                        self.audio.pause_music()
+                elif self.state == "settings" and event.key == pygame.K_2:
+                    self.settings["shadows"] = not self.settings.get("shadows", True)
+                elif self.state == "settings" and event.key in (pygame.K_RETURN, pygame.K_ESCAPE):
+                    self.state = "menu"
+                elif self.state == "playing" and event.key == pygame.K_s:
+                    self.save_game()
                 elif self.state in ("game_over", "victory") and event.key == pygame.K_RETURN:
                     self.start_run()
                 elif self.state == "paused" and event.key == pygame.K_RETURN:
@@ -854,6 +1124,7 @@ class Game:
         if self.state not in ("playing", "shop"):
             return
 
+        self.maybe_unlock_weapons()
         room = self.current_room
         if self.keys is None:
             self.keys = pygame.key.get_pressed()
@@ -866,6 +1137,11 @@ class Game:
 
         if self.player.dash_time > 0:
             self.player.dash_time -= dt
+
+        if self.boss_intro_timer > 0:
+            self.boss_intro_timer = max(0.0, self.boss_intro_timer - dt)
+        if self.phase_message_timer > 0:
+            self.phase_message_timer = max(0.0, self.phase_message_timer - dt)
 
         if self.current_room.kind == "shop" and self.state == "playing" and self.shop_room_id != self.dungeon.current_room_id:
             self.state = "shop"
@@ -884,9 +1160,12 @@ class Game:
 
         for enemy in list(self.current_room.enemies):
             if not enemy.alive:
-                self.player.gold += 8
+                self.spawn_enemy_drop(enemy)
+                self.player.gold += 8 + (20 if enemy.kind == "boss" else 0)
                 self.current_room.enemies.remove(enemy)
                 self.audio.play("hit")
+                if enemy.kind == "boss":
+                    self.audio.play("boss_roar")
                 continue
             enemy.update(dt, self.player, self.current_room, self.projectiles)
 
@@ -900,15 +1179,48 @@ class Game:
                     if not enemy.alive:
                         continue
                     if math.hypot(projectile.x - enemy.x, projectile.y - enemy.y) < enemy.radius + projectile.radius:
-                        enemy.take_damage(projectile.damage)
+                        damage = enemy.take_damage(projectile.damage)
+                        self.damage_texts.append(FloatingText(enemy.x, enemy.y - 18, f"{int(damage)}", (255, 210, 120), 0.8, 18))
                         self.audio.play("hit")
                         self.projectiles.remove(projectile)
                         break
             else:
                 if math.hypot(projectile.x - self.player.x, projectile.y - self.player.y) < self.player.radius + projectile.radius:
-                    self.player.take_damage(projectile.damage)
+                    damage = self.player.take_damage(projectile.damage)
+                    self.damage_texts.append(FloatingText(self.player.x, self.player.y - 18, f"-{int(damage)}", (255, 120, 120), 0.8, 18))
                     self.audio.play("hurt")
                     self.projectiles.remove(projectile)
+
+        for text in list(self.damage_texts):
+            text.update(dt)
+            if text.life <= 0:
+                self.damage_texts.remove(text)
+
+        for drop in list(self.drops):
+            drop.update(dt)
+            if drop.life <= 0:
+                self.drops.remove(drop)
+                continue
+            if math.hypot(drop.x - self.player.x, drop.y - self.player.y) < self.player.radius + drop.radius + 10:
+                if drop.kind == "gold":
+                    self.player.gold += 6
+                elif drop.kind == "essence":
+                    self.player.damage += 1
+                    self.player.health = min(self.player.max_health, self.player.health + 6)
+                elif drop.kind == "vital":
+                    self.player.health = min(self.player.max_health, self.player.health + 24)
+                    self.player.damage += 2
+                elif drop.kind == "heal":
+                    self.player.health = min(self.player.max_health, self.player.health + 18)
+                self.drops.remove(drop)
+
+        if self.current_room and self.current_room.healing_well is not None:
+            well = self.current_room.healing_well
+            if math.hypot(well.x - self.player.x, well.y - self.player.y) < well.radius + self.player.radius + 8:
+                if well.cooldown <= 0:
+                    self.player.health = min(self.player.max_health, self.player.health + 8)
+                    well.cooldown = 3.0
+                    well.pulse = 0.5
 
         if self.player.health <= 0:
             self.state = "game_over"
@@ -924,6 +1236,10 @@ class Game:
 
         if self.current_room.kind == "boss" and len(self.current_room.enemies) > 0:
             for enemy in self.current_room.enemies:
+                if enemy.kind == "boss" and enemy.health < enemy.max_health * 0.5 and not getattr(enemy, "roared", False):
+                    enemy.roared = True
+                    self.phase_message_timer = 1.8
+                    self.audio.play("boss_roar")
                 if enemy.kind == "boss" and enemy.health < enemy.max_health * 0.5 and enemy.attack_cooldown <= 0:
                     enemy.attack_cooldown = 0.7
                     for i in range(10):
@@ -934,19 +1250,30 @@ class Game:
         self.screen.fill((20, 23, 30))
 
         if self.state == "menu":
-            self.screen.fill((18, 21, 28))
+            self.screen.fill((11, 15, 22))
             panel = pygame.Rect(150, 90, WIDTH - 300, HEIGHT - 180)
-            pygame.draw.rect(self.screen, (26, 33, 42), panel)
-            pygame.draw.rect(self.screen, (116, 150, 190), panel, 3)
+            pygame.draw.rect(self.screen, (20, 27, 36), panel)
+            pygame.draw.rect(self.screen, (205, 160, 110), panel, 3)
 
-            title = self.big_font.render("Dungeon Warden", True, (220, 200, 170))
-            sub = self.font.render("Press Enter to begin", True, (240, 240, 240))
-            hint = self.font.render("Use the mouse to aim and click to attack", True, (200, 210, 220))
-            music_text = self.font.render("M toggles music", True, (160, 190, 255))
-            self.screen.blit(title, title.get_rect(center=(WIDTH / 2, 170)))
-            self.screen.blit(sub, sub.get_rect(center=(WIDTH / 2, 230)))
-            self.screen.blit(hint, hint.get_rect(center=(WIDTH / 2, 270)))
+            title = self.big_font.render("Dungeon Warden", True, (245, 214, 176))
+            self.screen.blit(title, title.get_rect(center=(WIDTH / 2, 165)))
 
+            self.menu_buttons = []
+            actions = [
+                ("Start Run", "start", pygame.Rect(470, 240, 340, 54)),
+                ("Load Save", "load", pygame.Rect(470, 312, 340, 54)),
+                ("Settings", "settings", pygame.Rect(470, 384, 340, 54)),
+            ]
+            for label, action, rect in actions:
+                self.menu_buttons.append({"label": label, "action": action, "rect": rect})
+                color = (72, 86, 100) if action != "start" else (92, 120, 110)
+                pygame.draw.rect(self.screen, color, rect)
+                pygame.draw.rect(self.screen, (220, 220, 220), rect, 2)
+                text = self.font.render(label, True, (255, 255, 255))
+                self.screen.blit(text, text.get_rect(center=rect.center))
+
+            hint = self.font.render("Use the mouse or press Enter to start", True, (201, 211, 224))
+            self.screen.blit(hint, hint.get_rect(center=(WIDTH / 2, 470)))
             controls = [
                 "WASD = move",
                 "Shift = sprint",
@@ -959,14 +1286,29 @@ class Game:
                 "E = enter door",
                 "Esc = pause",
             ]
-            start_y = 320
+            start_y = 520
             for i, line in enumerate(controls):
                 label = self.font.render(line, True, (220, 220, 220))
-                self.screen.blit(label, label.get_rect(center=(WIDTH / 2, start_y + i * 22)))
+                self.screen.blit(label, label.get_rect(center=(WIDTH / 2, start_y + i * 20)))
 
             footer = self.font.render("Clear each floor, survive the boss, and buy upgrades in the shop.", True, (170, 200, 180))
-            self.screen.blit(footer, footer.get_rect(center=(WIDTH / 2, 590)))
-            self.screen.blit(music_text, music_text.get_rect(center=(WIDTH / 2, 630)))
+            self.screen.blit(footer, footer.get_rect(center=(WIDTH / 2, 660)))
+            pygame.display.flip()
+            return
+
+        if self.state == "settings":
+            self.screen.fill((11, 15, 22))
+            panel = pygame.Rect(250, 150, 780, 420)
+            pygame.draw.rect(self.screen, (22, 31, 40), panel)
+            pygame.draw.rect(self.screen, (200, 180, 130), panel, 3)
+            title = self.big_font.render("Settings", True, (245, 214, 176))
+            self.screen.blit(title, title.get_rect(center=(WIDTH / 2, 210)))
+            music_text = self.font.render(f"1. Music: {'On' if self.settings.get('music', True) else 'Off'}", True, (255, 255, 255))
+            shadows_text = self.font.render(f"2. Shadows: {'On' if self.settings.get('shadows', True) else 'Off'}", True, (255, 255, 255))
+            self.screen.blit(music_text, music_text.get_rect(center=(WIDTH / 2, 300)))
+            self.screen.blit(shadows_text, shadows_text.get_rect(center=(WIDTH / 2, 340)))
+            footer = self.font.render("Press 1 or 2 to toggle, Enter or Esc to return", True, (200, 210, 220))
+            self.screen.blit(footer, footer.get_rect(center=(WIDTH / 2, 430)))
             pygame.display.flip()
             return
 
@@ -976,10 +1318,10 @@ class Game:
             return
 
         tile_themes = {
-            "stone": ((52, 60, 70), (46, 54, 64)),
-            "crypt": ((64, 58, 74), (48, 44, 58)),
-            "forge": ((70, 52, 40), (60, 44, 34)),
-            "swamp": ((54, 64, 54), (46, 56, 48)),
+            "stone": ((34, 40, 49), (56, 48, 42)),
+            "crypt": ((30, 30, 40), (46, 38, 54)),
+            "forge": ((62, 46, 36), (46, 30, 26)),
+            "swamp": ((38, 52, 46), (30, 42, 36)),
         }
         a, b = tile_themes.get(room.theme, tile_themes["stone"])
         for tile_x in range(room.left, room.right, 32):
@@ -1020,7 +1362,13 @@ class Game:
             enemy.draw(self.screen)
         for projectile in self.projectiles:
             pygame.draw.circle(self.screen, projectile.color, (int(projectile.x), int(projectile.y)), projectile.radius)
+        for drop in self.drops:
+            drop.draw(self.screen)
+        if self.current_room and self.current_room.healing_well is not None:
+            self.current_room.healing_well.draw(self.screen)
         self.player.draw(self.screen)
+        for text in self.damage_texts:
+            text.draw(self.screen, self.font)
 
         hp_bar = pygame.Rect(30, 20, 260, 24)
         hp_ratio = self.player.health / self.player.max_health
@@ -1034,6 +1382,7 @@ class Game:
         self.screen.blit(self.font.render(f"Floor: {self.current_floor}/{self.max_floor}", True, (180, 220, 255)), (760, 22))
         self.screen.blit(self.font.render(f"Room: {self.dungeon.room_name()}", True, (210, 220, 255)), (760, 48))
         self.screen.blit(self.font.render(f"Damage: {self.player.damage}", True, (255, 255, 255)), (1010, 22))
+        self.screen.blit(self.font.render("S = save", True, (170, 230, 180)), (1010, 78))
 
         stamina_bar = pygame.Rect(30, 58, 260, 12)
         stamina_ratio = self.player.stamina / self.player.max_stamina
@@ -1053,6 +1402,20 @@ class Game:
             py = int(self.door_pos[1]) - 34
             self.screen.blit(prompt, prompt.get_rect(center=(px, py)))
 
+        if self.current_room and self.current_room.kind == "boss" and self.boss_intro_timer > 0:
+            alpha = min(1.0, self.boss_intro_timer / 2.8)
+            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, int((1.0 - alpha) * 180)))
+            self.screen.blit(overlay, (0, 0))
+            title = self.big_font.render("BOSS", True, (255, 120, 110))
+            sub = self.font.render("The Warden Awakens", True, (255, 220, 180))
+            self.screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT / 2 - 28)))
+            self.screen.blit(sub, sub.get_rect(center=(WIDTH / 2, HEIGHT / 2 + 20)))
+
+        if self.phase_message_timer > 0 and self.current_room and self.current_room.kind == "boss":
+            phase_text = self.big_font.render("PHASE SHIFT", True, (255, 188, 92))
+            self.screen.blit(phase_text, phase_text.get_rect(center=(WIDTH / 2, 110)))
+
         if self.state == "upgrade":
             overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 140))
@@ -1060,7 +1423,7 @@ class Game:
             title = self.font.render("Choose an upgrade", True, (255, 255, 255))
             self.screen.blit(title, title.get_rect(center=(WIDTH / 2, 120)))
             self.pending_boxes = []
-            rarity_colors = {"common": (46, 62, 76), "uncommon": (46, 76, 60), "rare": (72, 52, 90)}
+            rarity_colors = {"common": (46, 62, 76), "uncommon": (46, 76, 60), "rare": (72, 52, 90), "epic": (96, 64, 140), "legendary": (140, 100, 40)}
             for i, choice in enumerate(self.pending_choices):
                 rect = pygame.Rect(170 + i * 300, 200, 240, 190)
                 self.pending_boxes.append(rect)
@@ -1069,7 +1432,7 @@ class Game:
                 pygame.draw.rect(self.screen, (220, 220, 220), rect, 2)
                 rarity_label = self.font.render(choice.get("rarity", "common").title(), True, (255, 255, 255))
                 self.screen.blit(rarity_label, rarity_label.get_rect(center=(rect.centerx, rect.y + 25)))
-                name_label = self.font.render(choice["name"], True, (255, 255, 255))
+                name_label = self.font.render(choice.get("display_name", choice["name"]), True, (255, 255, 255))
                 self.screen.blit(name_label, name_label.get_rect(center=(rect.centerx, rect.y + 80)))
         elif self.state == "shop":
             overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
