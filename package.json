@@ -1,16 +1,21 @@
 {
   "name": "me",
   "version": "1.0.0",
-  "description": "A minimal starter project",
+  "description": "Project Dungeon Man, a terminal number-guessing game",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "game": "node src/index.js --game",
+    "build:windows": "pkg src/index.js --targets node18-win-x64 --output dist/DungeonRPG.exe",
     "test": "node --test"
   },
   "keywords": [
-    "starter",
-    "project"
+    "game",
+    "dungeon",
+    "terminal"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
 }

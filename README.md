@@ -26,6 +26,7 @@ guesses you needed when you win. Use `Ctrl+C` to leave at any time.
 
 - `npm start` — run the app
 - `npm run game` — play Guess the Number in the terminal
+- `npm run build:windows` — build `dist/DungeonRPG.exe`
 - `npm test` — run the test suite
 
 ## Structure
@@ -46,3 +47,14 @@ To play:
 ```bash
 npm run game
 ```
+
+## Build the Windows version
+
+After installing dependencies, create a standalone Windows executable with:
+
+```bash
+npm run build:windows
+```
+
+The output is written to `dist/DungeonRPG.exe`. It is a console application,
+so it should be launched from Command Prompt or PowerShell.
